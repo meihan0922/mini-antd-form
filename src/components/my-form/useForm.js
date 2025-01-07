@@ -31,7 +31,14 @@ class FormStore {
       ...this.store,
       ...newStore,
     };
-    // !TODO: 待觸發 react 更新渲染
+    this.fieldEntities.forEach((i) => {
+      Object.keys(newStore).forEach((k) => {
+        if (k === i.props.name) {
+          // 如果 Field 內有更新，才需要改變
+          i.onStoreChange();
+        }
+      });
+    });
     return this.store;
   };
 
@@ -43,10 +50,31 @@ class FormStore {
     return { ...this.store };
   };
 
+  validate = () => {
+    let err = [];
+    this.fieldEntities.forEach((i) => {
+      if (i.props.rules) {
+        const { name, rules } = i.props;
+        let rule = rules[0];
+        const val = this.getFieldValue(name);
+        if (rule && rule.required) {
+          if (val === undefined || val === "") {
+            err.push({ name: rule.message, value: val });
+          }
+        }
+      }
+    });
+    return err;
+  };
+
   submit = () => {
+    let err = this.validate();
     const { onFinish, onFinishFailed } = this.callbacks;
-    // !TODO: 待寫檢查錯誤
-    onFinish(this.getFieldsValue());
+    if (err.length === 0) {
+      onFinish(this.getFieldsValue());
+    } else {
+      onFinishFailed(err, this.getFieldsValue());
+    }
   };
 
   // 外層可以拿到整個儲存庫

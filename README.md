@@ -399,3 +399,128 @@ export default class Field extends Component {
 }
 ```
 
+### Field 實現觸發 react 渲染
+
+前面有說，希望局部重新渲染，所以把觸發寫在 `Field`。
+類組件中，有 `forceUpdate` 可以使 react 更新
+
+```tsx
+export default class Field extends Component {
+  static contextType = FieldContext;
+
+  componentDidMount() {
+    this.unregister = this.context.registerFieldEntities(this);
+  }
+
+  componentWillUnmount() {
+    this.unregister();
+  }
+
+  onStoreChange = () => {
+    this.forceUpdate();
+  };
+
+  getControlled = () => {
+    const { getFieldValue, setFieldsValue } = this.context;
+    const { name } = this.props;
+
+    return {
+      value: getFieldValue(name),
+      onChange: (e) => {
+        const newVal = e.target.value;
+        setFieldsValue({
+          [name]: newVal,
+        });
+      },
+    };
+  };
+
+  render() {
+    const { children } = this.props;
+    const returnChildNode = React.cloneElement(children, this.getControlled());
+    return returnChildNode;
+  }
+}
+```
+
+交給 `FormStore`，在 `setFieldsValue` 實現更新。
+
+```tsx
+// 定義狀態管理庫
+class FormStore {
+  constructor() {
+    this.store = {}; // 狀態庫
+    this.fieldEntities = []; // 把每個 Field 都訂閱
+    this.callbacks = {};
+  }
+
+  registerFieldEntities = (entity) => {
+    // 訂閱後要做更新
+    this.fieldEntities.push(entity);
+
+    return () => {
+      this.fieldEntities = this.fieldEntities.filter((item) => item !== entity);
+      delete this.store[entity.props.name];
+    };
+  };
+
+  setFieldsValue = (newStore) => {
+    this.store = {
+      ...this.store,
+      ...newStore,
+    };
+    this.fieldEntities.forEach((i) => {
+      Object.keys(newStore).forEach((k) => {
+        if (k === i.props.name) {
+          // 如果 Field 內有更新，才需要改變
+          i.onStoreChange();
+        }
+      });
+    });
+    return this.store;
+  };
+}
+```
+
+### 實現 validate
+
+源碼中這裡實現比較複雜，先實現 required 判斷而已。
+
+```tsx
+// 定義狀態管理庫
+class FormStore {
+  constructor() {
+    this.store = {}; // 狀態庫
+    this.fieldEntities = []; // 把每個 Field 都訂閱
+    this.callbacks = {};
+  }
+
+  // ... 中間省略
+  validate = () => {
+    let err = [];
+    this.fieldEntities.forEach((i) => {
+      if (i.props.rules) {
+        const { name, rules } = i.props;
+        let rule = rules[0];
+        const val = this.getFieldValue(name);
+        if (rule && rule.required) {
+          if (val === undefined || val === "") {
+            err.push({ name: rule.message, value: val });
+          }
+        }
+      }
+    });
+    return err;
+  };
+
+  submit = () => {
+    let err = this.validate();
+    const { onFinish, onFinishFailed } = this.callbacks;
+    if (err.length === 0) {
+      onFinish(this.getFieldsValue());
+    } else {
+      onFinishFailed(err, this.getFieldsValue());
+    }
+  };
+}
+```
