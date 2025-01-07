@@ -25,12 +25,12 @@ export function FieldF(props) {
     };
   };
 
-  const returnChildNode = React.cloneElement(children, getControlled());
-
   // 如果外層使用者使用類組件在 componentDidMount 更新初始值，就會來不及反應給組件，因此用 useLayoutEffect
   useLayoutEffect(() => {
     return registerFieldEntities({ props, onStoreChange: forceUpdate });
   }, []);
+
+  const returnChildNode = React.cloneElement(children, getControlled());
 
   return returnChildNode;
 }

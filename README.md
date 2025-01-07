@@ -235,7 +235,7 @@ class FormStore {
 
 先使用 class 組件寫，之後會說明為什麼。
 主要是從 `context` 跨層級拿儲存庫的內容。
-以 `cloneElement` 改變 props 內容，並且 context 以 `props.children` 的方式，可以有效防止重新渲染（可以看 mini-react 專案內有寫 composition 優化）。
+以 `cloneElement` 改變 props 內容，並且 context 以 `props.children` 的方式，可以有效防止重新渲染（可以看 `mini-react 專案` 內有寫 composition 優化）。
 子節點目前變成受控組件了。
 
 > src/components/my-form/Field.js
@@ -522,5 +522,171 @@ class FormStore {
       onFinishFailed(err, this.getFieldsValue());
     }
   };
+}
+```
+
+### 適配類組件
+
+官網中有一段文字：`注意 useForm 是 React Hooks 的实现，只能用于函数组件。如果是在 Class Component 下，你也可以通过 ref 获取数据域`。
+
+意思是說函式組件可以用 `const [form] = Form.useForm();` 來取得 form 儲存區。但 class 組件不行，
+他的使用情境是：
+
+```tsx
+class MyRCFieldFormClass extends Component {
+  formRef = React.createRef();
+
+  // 在綁定好組件後，設定預設值
+  componentDidMount() {
+    this.formRef.current.setFieldsValue({
+      username: "default!",
+    });
+  }
+
+  onFinish = (val) => {
+    console.log(
+      "%csrc/pages/MyRCFieldForm.tsx:16 onFinish",
+      "color: #26bfa5;",
+      val
+    );
+  };
+
+  onFinishFailed = (val) => {
+    console.log(
+      "%csrc/pages/MyRCFieldForm.tsx:16 onFinishFailed",
+      "color: #26bfa5;",
+      val
+    );
+  };
+
+  render() {
+    return (
+      <div>
+        <h3>MyRCFieldFormClass</h3>
+        <Form
+          ref={this.formRef}
+          onFinish={this.onFinish}
+          onFinishFailed={this.onFinishFailed}
+        >
+          <Field name="username" rules={[nameRules]}>
+            <Input placeholder="請輸入姓名" />
+          </Field>
+          <Field name="password" rules={[passwordRules]}>
+            <Input placeholder="請輸入密碼" />
+          </Field>
+          <button>submit</button>
+        </Form>
+      </div>
+    );
+  }
+}
+```
+
+把 `formStore` 綁上 `formRef`，但在 export 的地方，不能直接這樣輸出 ref，會爆錯誤。
+
+```tsx
+// ❌ 會需要轉發 ref
+const Form = _Form;
+
+// ⭕️
+const Form = React.forwardRef(_Form);
+```
+
+一定必須呼叫 `useForm`，但要區分類組件跟函式組件的用法：
+
+- 函式組件: 傳 `form`，可能使用者會自行調用 `useForm`，再透過 props 傳遞下來。
+- 類組件: 傳 `ref`，必須要賦予 `formInstance`。
+
+所以乾脆內部再次調用 `useForm` 傳入 form，如果是函式組件，已經創建過了，就不用再創建 `FormStore`。
+
+> src/components/my-form/Form.js
+
+```tsx
+export default function Form(
+  { children, form, onFinish, onFinishFailed },
+  ref
+) {
+  const [formInstance] = useForm(form);
+  form.setCallbacks({
+    onFinish,
+    onFinishFailed,
+  });
+
+  // 外暴指定的物件: 讓父組件可以使用 ref
+  useImperativeHandle(ref, () => {
+    return formInstance;
+  });
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        formInstance.submit();
+      }}
+    >
+      {/* 只使用到 跨組件傳遞的部分 */}
+      <FieldContext.Provider value={formInstance}>
+        {children}
+      </FieldContext.Provider>
+    </form>
+  );
+}
+```
+
+> src/components/my-form/useForm.js
+
+```tsx
+// 儲存 form 儲存區塊，只有一個！
+export default function useForm(form) {
+  const formRef = useRef();
+  if (!formRef.current) {
+    if (form) {
+      formRef.current = form;
+    } else {
+      const store = new FormStore().getForm();
+      formRef.current = store;
+    }
+  }
+  return [formRef.current];
+}
+```
+
+這樣就可以適配兩種使用方式。
+
+### 把 Field 寫成函式組件
+
+會遇到幾個問題：
+
+1. 前面把 `Field` 寫成類組件，是因為會註冊訂閱，儲存實例。如果是函式組件要另外處理！
+2. 調用 react 更新是 `forceUpdate` ，函式組件另外用 `useReducer` 做更新。為什麼不用 `useState`，可以參閱 `mini-react 專案` 內有寫，他有優化，提前比較，不一定會觸發更新！
+3. `componentDidMount` 註冊 `Field 實例`，不可以直接轉換成 `useEffect`，延遲執行會導致使用者在外部組件調用 `formStore` 時，還沒有拿到實例。因此要勇 `useLayoutEffect`。
+
+```tsx
+export function Field(props) {
+  const { getFieldValue, setFieldsValue, registerFieldEntities } =
+    useContext(FieldContext);
+  const { children, name } = props;
+  // 強制讓組件更新
+  const [, forceUpdate] = useReducer((x) => x + 1, 0);
+  const getControlled = () => {
+    return {
+      value: getFieldValue(name), // 用三方管理庫，拿狀態
+      onChange: (e) => {
+        const newVal = e.target.value;
+        setFieldsValue({
+          [name]: newVal,
+        });
+      },
+    };
+  };
+
+  // 如果外層使用者使用類組件在 componentDidMount 更新初始值，就會來不及反應給組件，因此用 useLayoutEffect
+  useLayoutEffect(() => {
+    return registerFieldEntities({ props, onStoreChange: forceUpdate });
+  }, []);
+
+  const returnChildNode = React.cloneElement(children, getControlled());
+
+  return returnChildNode;
 }
 ```

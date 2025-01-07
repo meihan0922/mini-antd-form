@@ -91,11 +91,15 @@ class FormStore {
 }
 
 // 儲存 form 儲存區塊，只有一個！
-export default function useForm() {
+export default function useForm(form) {
   const formRef = useRef();
   if (!formRef.current) {
-    const store = new FormStore().getForm();
-    formRef.current = store;
+    if (form) {
+      formRef.current = form;
+    } else {
+      const store = new FormStore().getForm();
+      formRef.current = store;
+    }
   }
   return [formRef.current];
 }
