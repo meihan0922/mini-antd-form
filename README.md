@@ -1,8 +1,9 @@
 # mini-antd-form
 
 源碼核心邏輯在 `rc-field-form`。
-雖然 antD3 和 antD4 已經過時，但背後的思想在各大框架依然看得到，所以探究下原理。
-只實現部分功能。
+雖然 antD4 已經過時，但背後的思想在各大框架依然看得到，所以探究下原理。
+主要著重在狀態的提取，實現小部分渲染。
+ps.只實現部分功能。
 
 ## 實現思路
 
@@ -101,7 +102,22 @@ export default function MyRCFieldForm(props) {
 }
 ```
 
-2. 處理 Form 組件
+2. 導出 Form
+
+> src/components/my-form/index.js
+
+```tsx
+import useForm from "./useForm";
+
+const Form = _Form;
+Form.Field = Field;
+Form.useForm = useForm;
+
+export { Field, useForm };
+export default Form;
+```
+
+3. 處理 Form 組件
 
 - props
 
@@ -135,7 +151,7 @@ export default function Form(
 }
 ```
 
-3. 處理 `FieldContext`
+4. 處理 `FieldContext`
 
 簡單定義一個 `context` 就好
 
@@ -149,7 +165,7 @@ const FieldContext = createContext();
 export default FieldContext;
 ```
 
-4. 處理儲存區
+5. 處理儲存區
 
 使用 `useRef` 讓 `store` 是唯一的指向，不會因為重新渲染而轉換。
 
@@ -215,7 +231,7 @@ class FormStore {
 }
 ```
 
-5. 處理 Field 組件
+6. 處理 Field 組件
 
 先使用 class 組件寫，之後會說明為什麼。
 主要是從 `context` 跨層級拿儲存庫的內容。
@@ -269,3 +285,117 @@ const CustomizeInput: React.FC = ({ value = "", ...otherProps }) => {
 
 export default CustomizeInput;
 ```
+
+### Field 實現訂閱 Store
+
+1. 處理 Form 組件
+
+- props
+
+  - children
+  - form?
+  - onFinish
+  - onFinishFailed
+
+> src/components/my-form/Form.js
+
+```tsx
+export default function Form(
+  { children, form, onFinish, onFinishFailed },
+  ref
+) {
+  form.setCallbacks({
+    onFinish,
+    onFinishFailed,
+  });
+
+  return (
+    <form
+      onSubmit={(e) => {
+        // 阻止預設的提交
+        e.preventDefault();
+        form.submit();
+      }}
+    >
+      {/* FieldContext 只使用到 跨組件傳遞的部分 */}
+      <FieldContext.Provider value={form}> {children}</FieldContext.Provider>
+    </form>
+  );
+}
+```
+
+2. FormStore 儲存 Field 元件
+
+> src/components/my-form/useForm.js
+
+```tsx
+class FormStore {
+  constructor() {
+    this.store = {}; // 狀態庫
+    this.fieldEntities = []; // 把每個 Field 都訂閱
+    this.callbacks = {};
+  }
+
+  registerFieldEntities = (entity) => {
+    // 儲存整個實例，這也是為什麼要用 class 組件
+    this.fieldEntities.push(entity);
+
+    // 回傳銷毀的函式
+    return () => {
+      this.fieldEntities = this.fieldEntities.filter((item) => item !== entity);
+      delete this.store[entity.props.name];
+    };
+  };
+
+  // 儲存 onFinish, onFinishFailed
+  setCallbacks = (cbs) => {
+    this.callbacks = {
+      ...this.callbacks,
+      ...cbs,
+    };
+  };
+
+  // ...省略
+
+  // 外層可以拿到整個儲存庫
+  getForm = () => {
+    return {
+      getFieldValue: this.getFieldValue,
+      getFieldsValue: this.getFieldsValue,
+      setFieldsValue: this.setFieldsValue,
+      submit: this.submit,
+      setCallbacks: this.setCallbacks,
+      registerFieldEntities: this.registerFieldEntities,
+    };
+  };
+}
+```
+
+3. 處理 Field 組件
+
+在 `componentDidMount`，儲存整個實例，這也是為什麼要用 class 組件
+
+> src/components/my-form/Field.js
+
+```tsx
+export default class Field extends Component {
+  static contextType = FieldContext;
+
+  componentDidMount() {
+    this.unregister = this.context.registerFieldEntities(this);
+  }
+
+  componentWillUnmount() {
+    this.unregister();
+  }
+
+  // ...中間省略
+
+  render() {
+    const { children } = this.props;
+    const returnChildNode = React.cloneElement(children, this.getControlled());
+    return returnChildNode;
+  }
+}
+```
+

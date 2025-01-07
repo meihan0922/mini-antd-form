@@ -6,6 +6,10 @@ export default function Form(
   { children, form, onFinish, onFinishFailed },
   ref
 ) {
+  form.setCallbacks({
+    onFinish,
+    onFinishFailed,
+  });
   return (
     <form
       onSubmit={(e) => {

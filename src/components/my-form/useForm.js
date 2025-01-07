@@ -4,6 +4,7 @@ import { useRef } from "react";
 class FormStore {
   constructor() {
     this.store = {}; // 狀態庫
+    this.fieldEntities = []; // 把每個 Field 都訂閱
     this.callbacks = {};
   }
 
@@ -12,6 +13,16 @@ class FormStore {
     this.callbacks = {
       ...this.callbacks,
       ...cbs,
+    };
+  };
+
+  registerFieldEntities = (entity) => {
+    // 訂閱後要做更新
+    this.fieldEntities.push(entity);
+
+    return () => {
+      this.fieldEntities = this.fieldEntities.filter((item) => item !== entity);
+      delete this.store[entity.props.name];
     };
   };
 
@@ -44,6 +55,7 @@ class FormStore {
       getFieldValue: this.getFieldValue,
       getFieldsValue: this.getFieldsValue,
       setFieldsValue: this.setFieldsValue,
+      registerFieldEntities: this.registerFieldEntities,
       submit: this.submit,
       setCallbacks: this.setCallbacks,
     };
